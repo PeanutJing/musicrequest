@@ -1,23 +1,19 @@
 {
-  "name": "musicrequest",
+  "name": "music-room",
   "version": "1.0.0",
-  "description": "Meeting-room song request and skip voting web app",
   "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js"
   },
-  "author": "",
-  "license": "MIT",
   "dependencies": {
-    "axios": "^1.6.0",
     "cors": "^2.8.5",
-    "dotenv": "^17.4.2",
-    "express": "^4.19.2",
-    "express-session": "^1.17.3",
+    "express": "^4.18.2",
     "socket.io": "^4.7.2",
-    "yt-search": "^2.13.1"
-  },
-  "devDependencies": {
-    "ngrok": "^5.0.0-beta.2"
+    "helmet": "^7.0.0",
+    "express-rate-limit": "^7.0.0",
+    "morgan": "^1.10.0"
   }
 }
