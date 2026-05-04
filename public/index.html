@@ -4,56 +4,56 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Music Request Room</title>
+    <title>Music Room</title>
     <link rel="stylesheet" href="styles.css" />
 </head>
 
 <body>
-    <div class="app-shell">
-        <header>
-            <div>
-                <h1>Music Request Room</h1>
-                <p>Request songs, vote to skip, and search tracks from anywhere.</p>
-            </div>
-            <div class="status-bar">
-                <span id="viewerCount">Viewers: 0</span>
-                <button id="loginButton"
-                    style="display: none; margin-left: 16px; padding: 8px 12px; font-size: 0.9rem;">Login with
-                    Spotify</button>
-                <span id="authStatus" style="margin-left: 16px; color: #9cc5ff;"></span>
-            </div>
-        </header>
+    <div class="layout">
 
-        <main>
-            <section class="panel">
-                <h2>Search and Request</h2>
-                <div class="search-row">
-                    <input id="searchInput" placeholder="Search song or artist" />
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <h1 class="logo">Music Room</h1>
+
+            <button id="loginButton" class="btn primary">Login with Spotify</button>
+            <p id="authStatus" class="auth-status"></p>
+
+            <div class="viewer">
+                👀 <span id="viewerCount">0</span> listening
+            </div>
+        </aside>
+
+        <!-- Main -->
+        <main class="main">
+
+            <!-- Search -->
+            <section class="search-section">
+                <div class="search-bar">
+                    <input id="searchInput" placeholder="What do you want to play?" />
                     <button id="searchButton">Search</button>
                 </div>
-                <div id="searchResults" class="search-results"></div>
-                <div id="previewPlayer" class="preview-player"></div>
-                <form id="manualRequestForm" class="manual-form">
-                    <h3>Manual request</h3>
-                    <input id="songTitle" placeholder="Song title" required />
-                    <input id="songArtist" placeholder="Artist name" required />
-                    <input id="requestedBy" placeholder="Your name (optional)" />
-                    <button type="submit">Add request</button>
-                </form>
+
+                <div id="searchResults" class="grid"></div>
             </section>
 
-            <section class="panel">
-                <h2>Request Queue</h2>
-                <div id="playerBar" class="player-bar"></div>
+            <!-- Queue -->
+            <section class="queue-section">
+                <h2>Queue</h2>
+
+                <button id="playButton" class="btn green">▶ Play</button>
+
                 <div id="nowPlaying" class="now-playing"></div>
-                <button id="playButton" style="display: none; width: 100%; margin-bottom: 16px;">Play Next Song</button>
-                <div id="queueList" class="queue-list"></div>
-                <p class="hint">Skip votes require at least half of connected viewers.</p>
+
+                <div id="queueList" class="queue"></div>
             </section>
+
         </main>
+
     </div>
 
+    <!-- Scripts -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://sdk.scdn.co/spotify-player.js"></script>
     <script src="main.js"></script>
 </body>
 

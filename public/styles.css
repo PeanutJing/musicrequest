@@ -1,245 +1,168 @@
-:root {
-  color-scheme: dark;
-  color: #ffffff;
-  background: #121212;
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-
+/* ===== RESET ===== */
 * {
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
+  font-family: "Helvetica Neue", Arial, sans-serif;
 }
 
 body {
-  margin: 0;
-  min-height: 100vh;
-  background: radial-gradient(circle at top, #2f2f42 0%, #121212 55%);
-  color: #e7e7ff;
+  background: #121212;
+  color: #fff;
 }
 
-.app-shell {
-  max-width: 1080px;
-  margin: 0 auto;
+/* ===== LAYOUT ===== */
+.layout {
+  display: flex;
+  height: 100vh;
+}
+
+/* ===== SIDEBAR ===== */
+.sidebar {
+  width: 260px;
+  background: #000;
   padding: 20px;
-}
-
-header {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-header h1 {
-  margin: 0 0 8px;
-  font-size: clamp(2rem, 3vw, 3rem);
-}
-
-header p {
-  margin: 0;
-  color: #b8b8d2;
-}
-
-.status-bar {
-  display: flex;
-  align-items: center;
-  color: #9cc5ff;
-  font-weight: 600;
-}
-
-main {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  flex-direction: column;
   gap: 20px;
 }
 
-.panel {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  padding: 20px;
-  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.35);
+.logo {
+  font-size: 1.4rem;
+  font-weight: bold;
 }
 
-.panel h2,
-.panel h3 {
-  margin-top: 0;
+.auth-status {
+  color: #1db954;
 }
 
-.search-row,
-.manual-form {
-  display: grid;
-  gap: 12px;
+.viewer {
+  font-size: 0.9rem;
+  opacity: 0.7;
 }
 
-input {
-  width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 14px;
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+/* ===== MAIN ===== */
+.main {
+  flex: 1;
+  padding: 30px;
+  overflow-y: auto;
 }
 
-button {
-  cursor: pointer;
-  border: none;
-  border-radius: 14px;
-  background: #5f7dff;
-  color: #fff;
-  padding: 12px 16px;
-  font-weight: 700;
-  transition: transform 0.18s ease, background 0.18s ease;
-}
-
-button:hover {
-  transform: translateY(-1px);
-  background: #7f9cff;
-}
-
-.search-results,
-.queue-list {
-  display: grid;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.preview-player {
-  margin-top: 16px;
-  padding: 14px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #dce0ff;
-}
-
-.search-item,
-.queue-item {
-  padding: 14px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.07);
+/* ===== SEARCH ===== */
+.search-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  margin-bottom: 20px;
 }
 
-.artist,
-.meta,
-.votes,
-.source,
-.preview-label,
-.player-controls {
-  color: #c7c7e1;
+.search-bar input {
+  flex: 1;
+  padding: 12px;
+  border-radius: 20px;
+  border: none;
+  background: #242424;
+  color: #fff;
+}
+
+.search-bar button {
+  padding: 12px 20px;
+  border-radius: 20px;
+  border: none;
+  background: #1db954;
+  color: #000;
+  cursor: pointer;
+}
+
+/* ===== GRID ===== */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.search-item {
+  background: #181818;
+  padding: 15px;
+  border-radius: 10px;
+  transition: 0.2s;
+}
+
+.search-item:hover {
+  background: #282828;
+}
+
+.search-item strong {
   display: block;
 }
 
-.preview-label.no-preview {
-  color: #ffb3b3;
-}
-
-.search-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.preview-details {
-  display: grid;
-  gap: 6px;
-}
-
-.now-playing-card {
-  padding: 14px;
-  border-radius: 18px;
-  background: rgba(100, 200, 255, 0.1);
-  border: 1px solid rgba(100, 200, 255, 0.3);
-  margin-bottom: 12px;
-}
-
-.meta {
-  margin-top: 6px;
-  font-size: 0.95rem;
-}
-
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.empty {
-  color: #9d9dbf;
-  margin: 0;
-}
-
-.hint {
-  color: #9d9dbf;
-  font-size: 0.95rem;
-  margin-top: 18px;
-}
-
-.player-bar {
-  margin-bottom: 16px;
-  padding: 12px;
-  border-radius: 14px;
-  background: rgba(100, 255, 150, 0.08);
-  border: 1px solid rgba(100, 255, 150, 0.2);
-}
-
-.mini-player {
-  display: grid;
-  gap: 8px;
-}
-
-.mini-player-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.mini-player-title {
-  font-weight: 700;
-  color: #9cff64;
-  font-size: 0.9rem;
-}
-
-.mini-progress-bar {
+.search-item button {
+  margin-top: 10px;
   width: 100%;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-  overflow: hidden;
+  padding: 8px;
+  border-radius: 20px;
+  border: none;
+  cursor: pointer;
 }
 
-.mini-progress-fill {
-  height: 100%;
-  background: #9cff64;
-  transition: width 0.1s linear;
+.search-item button:first-child {
+  background: #1db954;
+  color: #000;
 }
 
-.mini-player-time {
-  font-size: 0.8rem;
-  color: #9d9dbf;
-  text-align: center;
+.search-item button:last-child {
+  background: #333;
+  color: #fff;
 }
 
-.preview-paused,
-.preview-ended {
-  color: #ffb3b3;
-  margin: 8px 0;
+/* ===== QUEUE ===== */
+.queue-section {
+  margin-top: 40px;
 }
 
-.pause-preview-btn {
-  padding: 8px 12px;
-  font-size: 0.85rem;
-  background: #5f7dff;
+.queue {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-@media (max-width: 640px) {
-  header {
-    flex-direction: column;
-    align-items: stretch;
-  }
+.queue-item {
+  background: #181818;
+  padding: 12px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.queue-item:hover {
+  background: #282828;
+}
+
+/* ===== NOW PLAYING ===== */
+.now-playing {
+  margin-top: 20px;
+  padding: 15px;
+  background: #1db954;
+  color: #000;
+  border-radius: 10px;
+  font-weight: bold;
+}
+
+/* ===== BUTTON ===== */
+.btn {
+  padding: 10px;
+  border-radius: 20px;
+  border: none;
+  cursor: pointer;
+}
+
+.btn.primary {
+  background: #fff;
+  color: #000;
+}
+
+.btn.green {
+  background: #1db954;
+  color: #000;
+  margin-top: 10px;
 }
