@@ -1,59 +1,121 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
 
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Music Room</title>
+    <title>Music Request Room</title>
     <link rel="stylesheet" href="styles.css" />
 </head>
 
 <body>
-    <div class="layout">
-
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <h1 class="logo">Music Room</h1>
-
-            <button id="loginButton" class="btn primary">Login with Spotify</button>
-            <p id="authStatus" class="auth-status"></p>
-
-            <div class="viewer">
-                👀 <span id="viewerCount">0</span> listening
+    <header class="main-header">
+        <div
+            style="max-width: 1280px; margin: 0 auto; padding: 1rem 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+            <div>
+                <h1
+                    style="font-family: 'IBM Plex Sans Thai', sans-serif; font-size: 1.65rem; color: var(--thai-red); line-height: 1.1;">
+                    Music Request Room</h1>
+                <p style="font-size: 0.92rem; opacity: 0.85; margin-top: 0.35rem;">ค้นหาเพลง ขอเพลง โหวตข้ามคิว
+                    และเล่นต่ออัตโนมัติ</p>
             </div>
-        </aside>
 
-        <!-- Main -->
-        <main class="main">
+            <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; justify-content: flex-end;">
+                <div id="viewerCount" style="font-size: 0.9rem; color: var(--thai-red); font-weight: 700;">Viewers: 0
+                </div>
+                <span id="authStatus" style="font-size: 0.9rem; color: var(--thai-gold);">พร้อมใช้งาน</span>
+            </div>
+        </div>
+    </header>
 
-            <!-- Search -->
-            <section class="search-section">
-                <div class="search-bar">
-                    <input id="searchInput" placeholder="What do you want to play?" />
-                    <button id="searchButton">Search</button>
+    <main style="max-width: 1280px; margin: 0 auto; padding: 110px 1.25rem 2rem;">
+        <section style="display: grid; grid-template-columns: 1.1fr 0.95fr; gap: 1.5rem; align-items: start;">
+            <div class="card-thai reveal" style="min-height: 220px;">
+                <div
+                    style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                    <h2
+                        style="font-family: 'IBM Plex Sans Thai', sans-serif; font-size: 1.18rem; color: var(--thai-red);">
+                        ค้นหาเพลง</h2>
+                    <span style="font-size: 0.9rem; color: rgba(45,45,45,0.75);">ใช้ YouTube search</span>
                 </div>
 
-                <div id="searchResults" class="grid"></div>
-            </section>
+                <form id="searchForm" style="display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <input id="searchInput" type="text" placeholder="พิมพ์ชื่อเพลงหรือศิลปิน" autocomplete="off"
+                        style="flex: 1; min-width: 220px; border: 1px solid rgba(179, 139, 89, 0.22); background: #fff; border-radius: 999px; padding: 0.9rem 1.05rem; font-size: 0.98rem; outline: none;" />
+                    <button id="searchButton" type="submit" class="btn-thai">ค้นหา</button>
+                </form>
 
-            <!-- Queue -->
-            <section class="queue-section">
-                <h2>Queue</h2>
+                <div id="searchResults" style="display: grid; gap: 0.85rem;"></div>
+            </div>
 
-                <button id="playButton" class="btn green">▶ Play</button>
+            <div style="display: grid; gap: 1.5rem;">
+                <div class="card-thai reveal" style="background: linear-gradient(180deg, #fff 0%, #fbf6ed 100%);">
+                    <div
+                        style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                        <h2
+                            style="font-family: 'IBM Plex Sans Thai', sans-serif; font-size: 1.18rem; color: var(--thai-red);">
+                            กำลังเล่น</h2>
+                        <span id="currentVotesInfo" style="font-size: 0.9rem; color: rgba(45,45,45,0.75);">Votes: 0 /
+                            1</span>
+                    </div>
 
-                <div id="nowPlaying" class="now-playing"></div>
+                    <div
+                        style="border-radius: 18px; overflow: hidden; background: #000; box-shadow: 0 12px 30px rgba(0,0,0,0.12); margin-bottom: 1rem;">
+                        <div id="player" style="width: 100%; height: 340px;"></div>
+                    </div>
 
-                <div id="queueList" class="queue"></div>
-            </section>
+                    <div id="nowPlaying"></div>
 
-        </main>
+                    <div style="display: grid; gap: 0.9rem; margin-top: 1rem;">
+                        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                            <button id="enableSoundButton" class="btn-thai" type="button">เปิดเสียงเครื่องนี้</button>
+                            <button id="playButton" class="btn-thai" type="button">เล่นเพลงปัจจุบัน</button>
+                        </div>
 
-    </div>
+                        <div style="display: grid; gap: 0.35rem;">
+                            <label for="volume" style="font-size: 0.92rem; color: var(--text-main);">Volume</label>
+                            <input id="volume" type="range" min="0" max="100" value="60" />
+                        </div>
 
-    <!-- Scripts -->
+                        <div style="display: grid; gap: 0.35rem;">
+                            <div
+                                style="display: flex; justify-content: space-between; gap: 1rem; font-size: 0.9rem; color: rgba(45,45,45,0.78);">
+                                <span>สถานะเสียง</span>
+                                <span id="soundStatus">Muted</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 1rem;">
+                        <div
+                            style="height: 8px; width: 100%; background: rgba(179, 139, 89, 0.18); border-radius: 999px; overflow: hidden;">
+                            <div id="progressFill"
+                                style="height: 100%; width: 0%; background: linear-gradient(90deg, var(--thai-red), var(--thai-gold)); border-radius: 999px;">
+                            </div>
+                        </div>
+                        <div id="progressText"
+                            style="margin-top: 0.45rem; font-size: 0.88rem; color: rgba(45,45,45,0.72);">0:00 / 0:00
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-thai reveal">
+                    <div
+                        style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                        <h2
+                            style="font-family: 'IBM Plex Sans Thai', sans-serif; font-size: 1.18rem; color: var(--thai-red);">
+                            คิวเพลง</h2>
+                        <span id="queueMeta" style="font-size: 0.9rem; color: rgba(45,45,45,0.75);">0 เพลง</span>
+                    </div>
+
+                    <div id="queueList" style="display: grid; gap: 0.85rem;"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="https://sdk.scdn.co/spotify-player.js"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
     <script src="main.js"></script>
 </body>
 

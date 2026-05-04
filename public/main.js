@@ -1,234 +1,162 @@
+'use strict';
+
 console.log('MAIN JS LOADED');
 
 const socket = io();
 
-/* =========================
-   DOM
-========================= */
 const el = {
-    searchInput: document.getElementById('searchInput'),
-    searchButton: document.getElementById('searchButton'),
-    searchResults: document.getElementById('searchResults'),
-    previewPlayer: document.getElementById('previewPlayer'),
-    queueList: document.getElementById('queueList'),
-    manualForm: document.getElementById('manualRequestForm'),
-    songTitle: document.getElementById('songTitle'),
-    songArtist: document.getElementById('songArtist'),
-    requestedBy: document.getElementById('requestedBy'),
-    viewerCount: document.getElementById('viewerCount'),
-    loginButton: document.getElementById('loginButton'),
-    authStatus: document.getElementById('authStatus'),
-    playButton: document.getElementById('playButton'),
-    nowPlaying: document.getElementById('nowPlaying'),
-    playerBar: document.getElementById('playerBar')
+  searchForm: document.getElementById('searchForm'),
+  searchInput: document.getElementById('searchInput'),
+  searchButton: document.getElementById('searchButton'),
+  searchResults: document.getElementById('searchResults'),
+  queueList: document.getElementById('queueList'),
+  viewerCount: document.getElementById('viewerCount'),
+  authStatus: document.getElementById('authStatus'),
+  nowPlaying: document.getElementById('nowPlaying'),
+  queueMeta: document.getElementById('queueMeta'),
+  currentVotesInfo: document.getElementById('currentVotesInfo'),
+  enableSoundButton: document.getElementById('enableSoundButton'),
+  playButton: document.getElementById('playButton'),
+  volume: document.getElementById('volume'),
+  soundStatus: document.getElementById('soundStatus'),
+  progressFill: document.getElementById('progressFill'),
+  progressText: document.getElementById('progressText')
 };
 
-/* =========================
-   STATE
-========================= */
 const state = {
-    isAuthenticated: false,
-    queue: [],
-    currentlyPlaying: null,
-    previewAudio: null,
-    previewTrackId: null,
-    deviceId: null,
-    player: null,
-    sdkReady: false,
-    playerConnected: false
+  queue: [],
+  current: null,
+  viewerCount: 0,
+  player: null,
+  playerReady: false,
+  currentPlayId: null,
+  pendingPlay: null,
+  audioEnabled: false,
+  searchBusy: false
 };
 
-/* =========================
-   HELPERS
-========================= */
-function setText(elm, value) {
-    if (elm) elm.textContent = value;
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
-function renderError(target, message) {
-    if (!target) return;
-    target.innerHTML = `<p class="empty error">${message}</p>`;
+function formatTime(seconds) {
+  const s = Math.max(0, Math.floor(Number(seconds) || 0));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, '0')}`;
 }
 
-function encodeOrEmpty(value) {
-    return encodeURIComponent(value || '');
+function updateSoundStatus() {
+  if (!el.soundStatus) return;
+  el.soundStatus.textContent = state.audioEnabled ? 'On' : 'Muted';
+  el.enableSoundButton.textContent = state.audioEnabled ? 'ปิดเสียงเครื่องนี้' : 'เปิดเสียงเครื่องนี้';
 }
 
-/* =========================
-   AUTH
-========================= */
-async function checkAuthStatus() {
-    try {
-        const res = await fetch('/api/auth-status', {
-            credentials: 'include'
-        });
-        const data = await res.json();
-
-        state.isAuthenticated = !!data.authenticated;
-        updateAuthUI();
-
-        console.log('AUTH STATUS:', data);
-    } catch (err) {
-        console.error('AUTH CHECK ERROR:', err);
-        state.isAuthenticated = false;
-        updateAuthUI();
-    }
+function currentSkipThreshold() {
+  return Math.max(1, Math.ceil(state.viewerCount / 2));
 }
 
-function updateAuthUI() {
-    if (state.isAuthenticated) {
-        if (el.loginButton) el.loginButton.style.display = 'none';
-        if (el.authStatus) el.authStatus.textContent = '✓ Connected to Spotify';
-        if (el.playButton) el.playButton.style.display = 'block';
-    } else {
-        if (el.loginButton) el.loginButton.style.display = 'inline-block';
-        if (el.authStatus) el.authStatus.textContent = '';
-        if (el.playButton) el.playButton.style.display = 'none';
-    }
+function renderNowPlaying(track) {
+  if (!track) {
+    el.nowPlaying.innerHTML = `
+      <div class="card-thai" style="padding: 1rem; background: rgba(253,250,245,0.75);">
+        <strong style="color: var(--thai-red);">Now Playing</strong>
+        <div style="margin-top: 0.35rem; opacity: 0.8;">ยังไม่มีเพลงกำลังเล่น</div>
+      </div>
+    `;
+    el.currentVotesInfo.textContent = `Votes: 0 / ${currentSkipThreshold()}`;
+    return;
+  }
+
+  const votes = Number(track.votes || 0);
+  const threshold = currentSkipThreshold();
+
+  el.nowPlaying.innerHTML = `
+    <div class="card-thai" style="padding: 1rem; background: rgba(253,250,245,0.75); border-left-width: 5px;">
+      <div style="display: flex; gap: 1rem; align-items: center;">
+        <div style="width: 74px; height: 74px; border-radius: 16px; overflow: hidden; background: #f2eee8; flex-shrink: 0; box-shadow: 0 8px 18px rgba(0,0,0,0.08);">
+          ${track.thumbnail ? `<img src="${escapeHtml(track.thumbnail)}" alt="" style="width:100%;height:100%;object-fit:cover;" />` : ''}
+        </div>
+
+        <div style="min-width: 0;">
+          <div style="font-weight: 700; color: var(--thai-red); font-size: 1.02rem; line-height: 1.35;">${escapeHtml(track.title || '')}</div>
+          <div style="opacity: 0.85; margin-top: 0.2rem;">by ${escapeHtml(track.artist || '')}</div>
+          <div style="opacity: 0.72; margin-top: 0.2rem; font-size: 0.88rem;">Requested by ${escapeHtml(track.requestedBy || 'Guest')}</div>
+          <div style="opacity: 0.72; margin-top: 0.2rem; font-size: 0.88rem;">Votes: ${votes} / ${threshold}</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button id="voteSkipButton" class="btn-thai" type="button">Vote Skip</button>
+      </div>
+    </div>
+  `;
+
+  el.currentVotesInfo.textContent = `Votes: ${votes} / ${threshold}`;
 }
 
-if (el.loginButton) {
-    el.loginButton.addEventListener('click', () => {
-        window.location.href = '/login';
-    });
-}
+function renderQueue(queue) {
+  const upcoming = Array.isArray(queue) ? queue.slice(1) : [];
+  el.queueMeta.textContent = `${upcoming.length} เพลง`;
 
-/* =========================
-   SPOTIFY WEB PLAYBACK SDK
-========================= */
-function initSpotifyPlayer() {
-    if (state.player || !window.Spotify) return;
+  if (!upcoming.length) {
+    el.queueList.innerHTML = `
+      <div style="padding: 1rem 0; color: rgba(45,45,45,0.7);">คิวว่าง</div>
+    `;
+    return;
+  }
 
-    console.log('Initializing Spotify Player...');
+  el.queueList.innerHTML = upcoming.map((item, index) => `
+    <div class="card-thai" style="padding: 0.95rem; display: grid; grid-template-columns: 60px 1fr; gap: 0.9rem; align-items: center; border-left-width: 3px;">
+      <div style="width: 60px; height: 60px; border-radius: 14px; overflow: hidden; background: #f2eee8; box-shadow: 0 8px 18px rgba(0,0,0,0.06);">
+        ${item.thumbnail ? `<img src="${escapeHtml(item.thumbnail)}" alt="" style="width:100%;height:100%;object-fit:cover;" />` : ''}
+      </div>
 
-    state.player = new Spotify.Player({
-        name: 'Music Request Web Player',
-        getOAuthToken: async cb => {
-            try {
-                console.log('GET TOKEN');
-
-                const res = await fetch('/api/token', {
-                    credentials: 'include'
-                });
-
-                const data = await res.json();
-                console.log('TOKEN:', data);
-
-                if (!res.ok || !data.accessToken) {
-                    throw new Error(data.error || 'No access token');
-                }
-
-                cb(data.accessToken);
-            } catch (err) {
-                console.error('TOKEN FETCH ERROR:', err);
-                cb('');
-            }
-        },
-        volume: 0.8
-    });
-
-    state.player.addListener('ready', ({ device_id }) => {
-        console.log('SDK READY, DEVICE:', device_id);
-        state.deviceId = device_id;
-        state.playerConnected = true;
-    });
-
-    state.player.addListener('not_ready', ({ device_id }) => {
-        console.warn('SDK NOT READY:', device_id);
-        if (state.deviceId === device_id) {
-            state.deviceId = null;
-        }
-        state.playerConnected = false;
-    });
-
-    state.player.addListener('initialization_error', ({ message }) => {
-        console.error('SDK INIT ERROR:', message);
-    });
-
-    state.player.addListener('authentication_error', ({ message }) => {
-        console.error('SDK AUTH ERROR:', message);
-    });
-
-    state.player.addListener('account_error', ({ message }) => {
-        console.error('SDK ACCOUNT ERROR:', message);
-    });
-
-    state.player.addListener('playback_error', ({ message }) => {
-        console.error('SDK PLAYBACK ERROR:', message);
-    });
-
-    state.player.connect()
-        .then(success => {
-            console.log('PLAYER CONNECT RESULT:', success);
-        })
-        .catch(err => {
-            console.error('PLAYER CONNECT FAILED:', err);
-        });
-}
-
-window.onSpotifyWebPlaybackSDKReady = () => {
-    console.log('SPOTIFY SDK READY');
-    state.sdkReady = true;
-    initSpotifyPlayer();
-};
-
-/* =========================
-   SEARCH
-========================= */
-async function fetchSearch(query) {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`, {
-        credentials: 'include'
-    });
-
-    if (!res.ok) {
-        throw new Error(`Search failed: ${res.status}`);
-    }
-
-    return res.json();
+      <div style="min-width: 0;">
+        <div style="font-weight: 700; color: var(--thai-red); line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          ${index + 2}. ${escapeHtml(item.title || '')}
+        </div>
+        <div style="opacity: 0.85; margin-top: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">by ${escapeHtml(item.artist || '')}</div>
+        <div style="opacity: 0.7; margin-top: 0.15rem; font-size: 0.88rem;">Requested by ${escapeHtml(item.requestedBy || 'Guest')}</div>
+      </div>
+    </div>
+  `).join('');
 }
 
 function renderSearchResults(results) {
-    if (!el.searchResults) return;
+  if (!Array.isArray(results) || results.length === 0) {
+    el.searchResults.innerHTML = `
+      <div style="padding: 1rem 0; color: rgba(45,45,45,0.7);">ไม่พบผลลัพธ์</div>
+    `;
+    return;
+  }
 
-    if (!results || results.length === 0) {
-        renderError(el.searchResults, 'No search results. Try another query.');
-        return;
-    }
-
-    el.searchResults.innerHTML = results.map(song => `
-    <div class="search-item">
-      <div class="search-item-info">
-        <strong>${song.title}</strong>
-        <span class="artist">by ${song.artist}</span>
-        ${song.source ? `<div class="source">Source: ${song.source}</div>` : ''}
-        ${song.preview_url
-            ? `<div class="preview-label">Preview available</div>`
-            : `<div class="preview-label no-preview">No preview available</div>`
-        }
+  el.searchResults.innerHTML = results.map(song => `
+    <div class="card-thai" style="padding: 1rem; display: grid; grid-template-columns: 72px 1fr auto; gap: 1rem; align-items: center;">
+      <div style="width: 72px; height: 72px; border-radius: 16px; overflow: hidden; background: #f2eee8; box-shadow: 0 10px 20px rgba(0,0,0,0.08);">
+        ${song.thumbnail ? `<img src="${escapeHtml(song.thumbnail)}" alt="" style="width:100%;height:100%;object-fit:cover;" />` : ''}
       </div>
 
-      <div class="search-actions">
-        ${song.preview_url ? `
-          <button
-            type="button"
-            class="play-preview-btn"
-            data-action="preview"
-            data-id="${song.id}"
-            data-preview="${encodeOrEmpty(song.preview_url)}"
-            data-title="${encodeOrEmpty(song.title)}"
-            data-artist="${encodeOrEmpty(song.artist)}"
-          >
-            Play preview
-          </button>
-        ` : ''}
+      <div style="min-width: 0;">
+        <div style="font-weight: 700; color: var(--thai-red); line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(song.title || '')}</div>
+        <div style="opacity: 0.85; margin-top: 0.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">by ${escapeHtml(song.artist || '')}</div>
+        <div style="opacity: 0.7; margin-top: 0.15rem; font-size: 0.88rem;">YouTube</div>
+      </div>
 
+      <div style="display: grid; gap: 0.5rem; justify-items: end;">
         <button
+          class="btn-thai request-button"
+          data-video-id="${escapeHtml(song.videoId || '')}"
+          data-title="${escapeHtml(song.title || '')}"
+          data-artist="${escapeHtml(song.artist || '')}"
+          data-thumbnail="${escapeHtml(song.thumbnail || '')}"
           type="button"
-          class="request-button"
-          data-action="request"
-          data-title="${encodeOrEmpty(song.title)}"
-          data-artist="${encodeOrEmpty(song.artist)}"
-          data-uri="${encodeOrEmpty(song.uri || '')}"
+          style="padding: 0.55rem 1rem;"
         >
           Request
         </button>
@@ -237,299 +165,343 @@ function renderSearchResults(results) {
   `).join('');
 }
 
-if (el.searchButton) {
-    el.searchButton.addEventListener('click', async () => {
-        const query = el.searchInput?.value?.trim();
-        if (!query) return;
+async function safeFetchJson(url, options = {}) {
+  const res = await fetch(url, {
+    credentials: 'include',
+    ...options
+  });
 
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `Non-JSON response (${res.status})`);
+  }
+
+  const data = await res.json().catch(() => ({}));
+  return { res, data };
+}
+
+async function fetchSearch(query) {
+  const { res, data } = await safeFetchJson(`/api/search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) return [];
+  return Array.isArray(data) ? data : [];
+}
+
+function ensurePlayerReady() {
+  return !!(state.player && state.playerReady);
+}
+
+function updateProgress() {
+  try {
+    if (!ensurePlayerReady() || !state.current) return;
+    if (typeof state.player.getCurrentTime !== 'function' || typeof state.player.getDuration !== 'function') return;
+
+    const currentTime = Number(state.player.getCurrentTime() || 0);
+    const duration = Number(state.player.getDuration() || 0);
+
+    if (!duration || duration <= 0) {
+      el.progressText.textContent = `${formatTime(currentTime)} / 0:00`;
+      el.progressFill.style.width = '0%';
+      return;
+    }
+
+    const pct = Math.max(0, Math.min(100, (currentTime / duration) * 100));
+    el.progressFill.style.width = `${pct}%`;
+    el.progressText.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+  } catch (err) {
+    console.error('PROGRESS ERROR:', err);
+  }
+}
+
+function playTrack(track) {
+  if (!track || !track.videoId) return;
+
+  if (!ensurePlayerReady()) {
+    state.pendingPlay = track;
+    return;
+  }
+
+  try {
+    state.currentPlayId = Number(track.playId || 0);
+
+    if (!state.audioEnabled) {
+      state.player.mute();
+    } else {
+      state.player.unMute();
+    }
+
+    state.player.loadVideoById(track.videoId);
+    state.player.playVideo();
+
+    renderNowPlaying(track);
+    updateSoundStatus();
+  } catch (err) {
+    console.error('PLAY TRACK ERROR:', err);
+    state.pendingPlay = track;
+  }
+}
+
+function startPendingIfAny() {
+  if (state.pendingPlay && ensurePlayerReady()) {
+    const pending = state.pendingPlay;
+    state.pendingPlay = null;
+    playTrack(pending);
+  }
+}
+
+function initYouTubePlayer() {
+  if (!window.YT || !window.YT.Player) return;
+  if (state.player) return;
+
+  state.player = new YT.Player('player', {
+    height: '340',
+    width: '100%',
+    videoId: '',
+    playerVars: {
+      autoplay: 0,
+      controls: 1,
+      modestbranding: 1,
+      rel: 0,
+      playsinline: 1,
+      fs: 1
+    },
+    events: {
+      onReady: () => {
+        console.log('YT READY');
+        state.playerReady = true;
+        updateSoundStatus();
+        startPendingIfAny();
+      },
+      onStateChange: event => {
         try {
-            const results = await fetchSearch(query);
-            renderSearchResults(results);
-        } catch (err) {
-            console.error('SEARCH ERROR:', err);
-            renderError(el.searchResults, 'Search failed.');
-        }
-    });
-}
-
-if (el.searchInput) {
-    el.searchInput.addEventListener('keypress', event => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            el.searchButton?.click();
-        }
-    });
-}
-
-/* =========================
-   QUEUE / NOW PLAYING
-========================= */
-function renderQueue(queue) {
-    if (!el.queueList) return;
-
-    if (!queue || queue.length === 0) {
-        el.queueList.innerHTML = '<p class="empty">No requests yet. Add a song to get started.</p>';
-        return;
-    }
-
-    el.queueList.innerHTML = queue.map(item => `
-    <div class="queue-item">
-      <div class="queue-item-info">
-        <strong>${item.title}</strong>
-        <span class="artist">by ${item.artist}</span>
-        <div class="meta">Requested by ${item.requestedBy}</div>
-      </div>
-
-      <div class="queue-item-actions">
-        <button type="button" class="skip-button" data-id="${item.id}">Vote Skip</button>
-        <span class="votes">Votes: ${item.votes}</span>
-      </div>
-    </div>
-  `).join('');
-}
-
-function renderNowPlaying(track) {
-    if (!el.nowPlaying) return;
-
-    if (!track) {
-        el.nowPlaying.innerHTML = '';
-        return;
-    }
-
-    el.nowPlaying.innerHTML = `
-    <div class="now-playing-card">
-      <strong>Now Playing</strong>
-      <div>${track.title || ''}</div>
-      <div class="artist">${track.artist || ''}</div>
-      ${track.requestedBy ? `<div class="meta">Requested by ${track.requestedBy}</div>` : ''}
-    </div>
-  `;
-}
-
-/* =========================
-   PREVIEW PLAYER
-========================= */
-function playPreview(songId, previewUrl, title, artist) {
-    if (!previewUrl) {
-        renderError(el.previewPlayer, 'Preview not available for this track.');
-        return;
-    }
-
-    if (state.previewTrackId === songId && state.previewAudio && !state.previewAudio.paused) {
-        state.previewAudio.pause();
-        if (el.previewPlayer) el.previewPlayer.innerHTML = '<p class="preview-paused">Paused</p>';
-        return;
-    }
-
-    if (state.previewAudio) {
-        state.previewAudio.pause();
-        state.previewAudio = null;
-    }
-
-    const audio = new Audio(previewUrl);
-    state.previewAudio = audio;
-    state.previewTrackId = songId;
-
-    if (el.previewPlayer) {
-        el.previewPlayer.innerHTML = `
-      <div class="preview-details">
-        <strong>Preview</strong>
-        <div>${title} <span class="artist">by ${artist}</span></div>
-        <button type="button" id="togglePreviewBtn" class="pause-preview-btn">Pause</button>
-      </div>
-    `;
-    }
-
-    const toggleBtn = document.getElementById('togglePreviewBtn');
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => {
-            if (!state.previewAudio) return;
-            if (state.previewAudio.paused) {
-                state.previewAudio.play().catch(err => console.error('Preview play error:', err));
-                toggleBtn.textContent = 'Pause';
-            } else {
-                state.previewAudio.pause();
-                toggleBtn.textContent = 'Play';
+          if (event.data === YT.PlayerState.ENDED) {
+            if (state.currentPlayId) {
+              socket.emit('trackEnded', { playId: state.currentPlayId });
             }
-        });
-    }
-
-    audio.addEventListener('ended', () => {
-        if (el.previewPlayer) el.previewPlayer.innerHTML = '<p class="preview-ended">Preview ended</p>';
-    });
-
-    audio.play().catch(error => {
-        console.error('PREVIEW PLAY ERROR:', error);
-        if (el.previewPlayer) {
-            el.previewPlayer.innerHTML = `<p class="empty">Unable to play preview: ${error.message}</p>`;
+          }
+        } catch (err) {
+          console.error('YT STATE CHANGE ERROR:', err);
         }
-    });
+      },
+      onError: event => {
+        console.error('YT ERROR:', event?.data);
+        if (state.currentPlayId) {
+          socket.emit('trackEnded', { playId: state.currentPlayId, reason: 'yt-error' });
+        }
+      }
+    }
+  });
 }
 
-/* =========================
-   PLAY CURRENT QUEUE ITEM
-========================= */
-async function playCurrentTrack() {
-    if (!state.isAuthenticated) {
-        alert('Please login with Spotify first.');
-        return;
-    }
+window.onYouTubeIframeAPIReady = () => {
+  console.log('YOUTUBE SDK READY');
+  initYouTubePlayer();
+};
 
-    if (!state.deviceId) {
-        alert('Spotify player is not ready yet.');
-        return;
-    }
+if (window.YT && window.YT.Player) {
+  initYouTubePlayer();
+}
 
-    if (!state.queue.length) {
-        alert('Queue is empty. Add a song first.');
-        return;
-    }
+if (el.enableSoundButton) {
+  el.enableSoundButton.addEventListener('click', async () => {
+    state.audioEnabled = !state.audioEnabled;
+    updateSoundStatus();
 
-    const track = state.queue[0];
-    if (!track?.uri) {
-        alert('This track has no Spotify URI.');
-        return;
-    }
+    if (!ensurePlayerReady()) return;
 
     try {
-        const res = await fetch('/api/play', {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                trackUri: track.uri,
-                deviceId: state.deviceId
-            })
-        });
-
-        const data = await res.json();
-
-        if (!res.ok) {
-            throw new Error(data.error || 'Failed to play track');
-        }
-
-        console.log('PLAY OK:', data);
+      if (state.audioEnabled) {
+        state.player.unMute();
+        state.player.setVolume(Number(el.volume.value || 60));
+        state.player.playVideo();
+      } else {
+        state.player.mute();
+      }
     } catch (err) {
-        console.error('PLAY ERROR:', err);
-        alert(err.message);
+      console.error('AUDIO TOGGLE ERROR:', err);
     }
+  });
 }
 
 if (el.playButton) {
-    el.playButton.addEventListener('click', playCurrentTrack);
+  el.playButton.addEventListener('click', () => {
+    if (state.current) {
+      playTrack(state.current);
+    }
+  });
 }
 
-/* =========================
-   MANUAL REQUEST FORM
-========================= */
-if (el.manualForm) {
-    el.manualForm.addEventListener('submit', event => {
-        event.preventDefault();
-
-        const title = el.songTitle?.value?.trim();
-        const artist = el.songArtist?.value?.trim();
-        const requestedBy = el.requestedBy?.value?.trim() || 'Guest';
-
-        if (!title || !artist) return;
-
-        socket.emit('requestSong', {
-            title,
-            artist,
-            requestedBy
-        });
-
-        if (el.songTitle) el.songTitle.value = '';
-        if (el.songArtist) el.songArtist.value = '';
-        if (el.requestedBy) el.requestedBy.value = '';
-    });
+if (el.volume) {
+  el.volume.addEventListener('input', () => {
+    try {
+      if (state.player && typeof state.player.setVolume === 'function') {
+        state.player.setVolume(Number(el.volume.value));
+      }
+    } catch (err) {
+      console.error('VOLUME ERROR:', err);
+    }
+  });
 }
 
-/* =========================
-   SEARCH / QUEUE BUTTON CLICKS
-========================= */
+if (el.searchForm) {
+  el.searchForm.addEventListener('submit', async event => {
+    event.preventDefault();
+
+    const query = el.searchInput.value.trim();
+    if (!query || state.searchBusy) return;
+
+    state.searchBusy = true;
+    el.searchResults.innerHTML = `
+      <div style="padding: 1rem 0; color: rgba(45,45,45,0.7);">กำลังค้นหา...</div>
+    `;
+
+    try {
+      const results = await fetchSearch(query);
+      renderSearchResults(results);
+    } catch (err) {
+      console.error('SEARCH ERROR:', err);
+      el.searchResults.innerHTML = `
+        <div style="padding: 1rem 0; color: var(--thai-red);">ค้นหาไม่สำเร็จ</div>
+      `;
+    } finally {
+      state.searchBusy = false;
+    }
+  });
+}
+
 if (el.searchResults) {
-    el.searchResults.addEventListener('click', event => {
-        const button = event.target.closest('button');
-        if (!button) return;
+  el.searchResults.addEventListener('click', event => {
+    const btn = event.target.closest('.request-button');
+    if (!btn) return;
 
-        const action = button.dataset.action;
-        if (action === 'preview') {
-            const songId = button.dataset.id;
-            const previewUrl = decodeURIComponent(button.dataset.preview || '');
-            const title = decodeURIComponent(button.dataset.title || '');
-            const artist = decodeURIComponent(button.dataset.artist || '');
+    const payload = {
+      id: String(Date.now()),
+      videoId: btn.dataset.videoId || '',
+      title: btn.dataset.title || '',
+      artist: btn.dataset.artist || '',
+      thumbnail: btn.dataset.thumbnail || '',
+      requestedBy: 'Guest'
+    };
 
-            playPreview(songId, previewUrl, title, artist);
-        }
+    if (!payload.videoId || !payload.title) return;
 
-        if (action === 'request') {
-            const title = decodeURIComponent(button.dataset.title || '');
-            const artist = decodeURIComponent(button.dataset.artist || '');
-            const uri = decodeURIComponent(button.dataset.uri || '');
-            const requestedBy = el.requestedBy?.value?.trim() || 'Guest';
-
-            socket.emit('requestSong', {
-                title,
-                artist,
-                requestedBy,
-                uri: uri || null
-            });
-        }
-    });
+    socket.emit('requestSong', payload);
+  });
 }
 
 if (el.queueList) {
-    el.queueList.addEventListener('click', event => {
-        const button = event.target.closest('button.skip-button');
-        if (!button) return;
-
-        const songId = button.dataset.id;
-        socket.emit('voteSkip', songId);
-    });
+  el.queueList.addEventListener('click', event => {
+    const btn = event.target.closest('.skip-button');
+    if (!btn) return;
+    socket.emit('voteSkip', btn.dataset.id);
+  });
 }
 
-/* =========================
-   SOCKET EVENTS
-========================= */
+function renderAllFromState() {
+  renderQueue(state.queue);
+  renderNowPlaying(state.current);
+  updateSoundStatus();
+  updateProgress();
+}
+
+socket.on('connect', () => {
+  console.log('SOCKET CONNECTED');
+});
+
 socket.on('queueUpdated', queue => {
-    state.queue = Array.isArray(queue) ? queue : [];
-    renderQueue(state.queue);
+  state.queue = Array.isArray(queue) ? queue : [];
+  renderQueue(state.queue);
+  updateProgress();
 });
 
 socket.on('currentlyPlaying', track => {
-    state.currentlyPlaying = track || null;
-    renderNowPlaying(state.currentlyPlaying);
+  state.current = track || null;
+  renderNowPlaying(state.current);
+
+  if (state.current && state.current.videoId) {
+    if (!ensurePlayerReady()) {
+      state.pendingPlay = state.current;
+      return;
+    }
+
+    if (Number(state.currentPlayId) !== Number(state.current.playId)) {
+      playTrack(state.current);
+    }
+  }
+});
+
+socket.on('play', track => {
+  state.current = track || null;
+  renderNowPlaying(state.current);
+
+  if (!track || !track.videoId) return;
+
+  if (!ensurePlayerReady()) {
+    state.pendingPlay = track;
+    return;
+  }
+
+  playTrack(track);
+});
+
+socket.on('stop', () => {
+  state.current = null;
+  state.currentPlayId = null;
+  state.pendingPlay = null;
+
+  try {
+    if (state.player && typeof state.player.stopVideo === 'function') {
+      state.player.stopVideo();
+    }
+  } catch (err) {
+    console.error('STOP ERROR:', err);
+  }
+
+  renderNowPlaying(null);
+  updateProgress();
 });
 
 socket.on('viewerCount', count => {
-    setText(el.viewerCount, `Viewers: ${count}`);
+  state.viewerCount = Number(count || 0);
+  el.viewerCount.textContent = `Viewers: ${state.viewerCount}`;
+  renderNowPlaying(state.current);
 });
 
-/* =========================
-   INIT
-========================= */
-checkAuthStatus().then(() => {
-    if (state.isAuthenticated) {
-        updateAuthUI();
+socket.on('connect_error', err => {
+  console.error('SOCKET CONNECT ERROR:', err);
+});
+
+setInterval(() => {
+  updateProgress();
+}, 1000);
+
+window.addEventListener('error', event => {
+  console.error('WINDOW ERROR:', event.error || event.message);
+});
+
+window.addEventListener('unhandledrejection', event => {
+  console.error('UNHANDLED REJECTION:', event.reason);
+});
+
+async function initialLoad() {
+  try {
+    const { data } = await safeFetchJson('/api/queue');
+    state.queue = Array.isArray(data.queue) ? data.queue : [];
+    state.current = data.currentlyPlaying || null;
+    state.viewerCount = Number(data.viewers || 0);
+
+    el.viewerCount.textContent = `Viewers: ${state.viewerCount}`;
+    renderAllFromState();
+
+    if (state.current && state.current.videoId) {
+      state.pendingPlay = state.current;
+      startPendingIfAny();
     }
-});
-
-fetch('/api/queue', {
-    credentials: 'include'
-})
-    .then(res => res.json())
-    .then(data => {
-        state.queue = Array.isArray(data.queue) ? data.queue : [];
-        state.currentlyPlaying = data.currentlyPlaying || null;
-        renderQueue(state.queue);
-        renderNowPlaying(state.currentlyPlaying);
-    })
-    .catch(err => {
-        console.error('QUEUE INIT ERROR:', err);
-    });
-
-if (window.Spotify) {
-    window.onSpotifyWebPlaybackSDKReady?.();
+  } catch (err) {
+    console.error('INITIAL LOAD ERROR:', err);
+    renderAllFromState();
+  }
 }
+
+updateSoundStatus();
+initialLoad();

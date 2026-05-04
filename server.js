@@ -1,510 +1,239 @@
-require('dotenv').config();
-
 const express = require('express');
-const session = require('express-session');
 const http = require('http');
-const { Server } = require('socket.io');
-const axios = require('axios');
 const path = require('path');
-const querystring = require('querystring');
+const { Server } = require('socket.io');
+const ytSearch = require('yt-search');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    cors: {
+        origin: true,
+        credentials: true
+    }
+});
 
 const PORT = process.env.PORT || 3000;
-const {
-    SPOTIFY_CLIENT_ID,
-    SPOTIFY_CLIENT_SECRET,
-    SESSION_SECRET,
-    REDIRECT_URI
-} = process.env;
 
-if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET || !REDIRECT_URI) {
-    console.warn('Missing env vars: SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, or REDIRECT_URI');
-}
-
-/* =========================
-   TRUST PROXY FOR NGROK
-========================= */
-app.set('trust proxy', 1);
-
-/* =========================
-   MIDDLEWARE
-========================= */
 app.use(express.json());
-app.use(session({
-    secret: SESSION_SECRET || 'dev-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-        secure: true,      // required for https/ngrok
-        sameSite: 'none',   // required for cross-site cookie behavior
-        httpOnly: true
-    }
-}));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 /* =========================
-   MEMORY STATE
+   STATE
 ========================= */
 let queue = [];
-let nextQueueId = 1;
-let connectedCount = 0;
-let currentlyPlaying = null;
+let current = null;
+let viewers = 0;
+let playIdCounter = 0;
 
 /* =========================
-   SAMPLE SONGS (fallback)
+   HELPERS
 ========================= */
-const sampleSongs = [
-    { id: '1', title: 'Blinding Lights', artist: 'The Weeknd', source: 'Local' },
-    { id: '2', title: 'Levitating', artist: 'Dua Lipa', source: 'Local' },
-    { id: '3', title: 'Uptown Funk', artist: 'Mark Ronson ft. Bruno Mars', source: 'Local' },
-    { id: '4', title: 'Shape of You', artist: 'Ed Sheeran', source: 'Local' },
-    { id: '5', title: 'Can’t Stop', artist: 'Red Hot Chili Peppers', source: 'Local' },
-    { id: '6', title: 'Bad Guy', artist: 'Billie Eilish', source: 'Local' },
-    { id: '7', title: 'Señorita', artist: 'Shawn Mendes & Camila Cabello', source: 'Local' },
-    { id: '8', title: 'Dancing Queen', artist: 'ABBA', source: 'Local' },
-    { id: '9', title: 'Watermelon Sugar', artist: 'Harry Styles', source: 'Local' },
-    { id: '10', title: 'Rolling in the Deep', artist: 'Adele', source: 'Local' }
-];
-
-/* =========================
-   SPOTIFY APP TOKEN CACHE
-========================= */
-const appToken = {
-    accessToken: null,
-    expiresAt: 0
-};
-
-async function getAppAccessToken() {
-    if (appToken.accessToken && Date.now() < appToken.expiresAt - 60_000) {
-        return appToken.accessToken;
-    }
-
-    const authHeader = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
-
-    const params = new URLSearchParams();
-    params.append('grant_type', 'client_credentials');
-
-    const res = await axios.post(
-        'https://accounts.spotify.com/api/token',
-        params.toString(),
-        {
-            headers: {
-                Authorization: `Basic ${authHeader}`,
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
-        }
-    );
-
-    appToken.accessToken = res.data.access_token;
-    appToken.expiresAt = Date.now() + (res.data.expires_in * 1000);
-    return appToken.accessToken;
+function sanitizeTrack(track) {
+    return {
+        id: String(track.id || `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`),
+        videoId: String(track.videoId || ''),
+        title: String(track.title || ''),
+        artist: String(track.artist || ''),
+        thumbnail: String(track.thumbnail || ''),
+        requestedBy: String(track.requestedBy || 'Guest'),
+        votes: Number(track.votes || 0),
+        voters: Array.isArray(track.voters) ? track.voters : [],
+        source: String(track.source || 'YouTube'),
+        startedAt: Number(track.startedAt || 0),
+        playId: Number(track.playId || 0)
+    };
 }
 
-async function spotifySearch(query) {
-    const token = await getAppAccessToken();
+function emitState() {
+    io.emit('viewerCount', viewers);
+    io.emit('queueUpdated', queue);
+    io.emit('currentlyPlaying', current);
+}
 
-    const res = await axios.get('https://api.spotify.com/v1/search', {
-        headers: {
-            Authorization: `Bearer ${token}`
-        },
-        params: {
-            q: query,
-            type: 'track',
-            limit: 8
-        }
-    });
+function startCurrent() {
+    if (!queue.length) {
+        current = null;
+        io.emit('stop');
+        emitState();
+        return;
+    }
 
-    const items = res.data?.tracks?.items || [];
-    return items.map(track => ({
-        id: track.id,
-        title: track.name,
-        artist: track.artists.map(a => a.name).join(', '),
-        album: track.album?.name || '',
-        preview_url: track.preview_url || null,
-        uri: track.uri,
-        source: 'Spotify'
+    current = queue[0];
+    current.votes = 0;
+    current.voters = [];
+    current.startedAt = Date.now();
+    current.playId = ++playIdCounter;
+
+    queue[0] = current;
+
+    io.emit('play', current);
+    emitState();
+}
+
+function advanceQueue() {
+    if (queue.length) {
+        queue.shift();
+    }
+
+    if (!queue.length) {
+        current = null;
+        io.emit('stop');
+        emitState();
+        return;
+    }
+
+    startCurrent();
+}
+
+function addToQueue(payload) {
+    const item = sanitizeTrack(payload || {});
+    if (!item.videoId || !item.title) return null;
+
+    queue.push(item);
+
+    if (!current) {
+        startCurrent();
+    } else {
+        emitState();
+    }
+
+    return item;
+}
+
+async function searchYoutube(query) {
+    const result = await ytSearch(query);
+    const videos = Array.isArray(result?.videos) ? result.videos : [];
+
+    return videos.slice(0, 10).map(v => ({
+        id: v.videoId,
+        videoId: v.videoId,
+        title: v.title || '',
+        artist: v.author?.name || v.author?.username || '',
+        thumbnail: v.thumbnail || v.image || '',
+        source: 'YouTube'
     }));
 }
 
-/* =========================
-   SESSION TOKEN HELPERS
-========================= */
-async function refreshSpotifyUserToken(req) {
-    const refreshToken = req.session.spotifyRefreshToken;
-    if (!refreshToken) {
-        throw new Error('No refresh token in session');
-    }
-
-    const authHeader = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
-
-    const res = await axios.post(
-        'https://accounts.spotify.com/api/token',
-        querystring.stringify({
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken
-        }),
-        {
-            headers: {
-                Authorization: `Basic ${authHeader}`,
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
-        }
-    );
-
-    req.session.spotifyAccessToken = res.data.access_token;
-    req.session.spotifyAccessTokenExpiresAt = Date.now() + (res.data.expires_in * 1000);
-
-    return req.session.spotifyAccessToken;
-}
-
-async function getValidUserToken(req) {
-    const token = req.session.spotifyAccessToken;
-    const expiresAt = req.session.spotifyAccessTokenExpiresAt || 0;
-
-    if (token && Date.now() < expiresAt - 60_000) {
-        return token;
-    }
-
-    if (req.session.spotifyRefreshToken) {
-        return refreshSpotifyUserToken(req);
-    }
-
-    return null;
-}
-
-async function spotifyApiRequest(req, method, url, data = null, extraConfig = {}) {
-    let token = await getValidUserToken(req);
-    if (!token) {
-        const err = new Error('Not authenticated with Spotify');
-        err.statusCode = 401;
-        throw err;
-    }
-
-    try {
-        const res = await axios({
-            method,
-            url,
-            data,
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json',
-                ...(extraConfig.headers || {})
-            },
-            ...extraConfig
-        });
-
-        return res;
-    } catch (error) {
-        if (error.response?.status === 401 && req.session.spotifyRefreshToken) {
-            token = await refreshSpotifyUserToken(req);
-
-            const retry = await axios({
-                method,
-                url,
-                data,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                    ...(extraConfig.headers || {})
-                },
-                ...extraConfig
-            });
-
-            return retry;
-        }
-
-        throw error;
-    }
+function currentSkipThreshold() {
+    return Math.max(1, Math.ceil(viewers / 2));
 }
 
 /* =========================
-   BROADCAST
+   API
 ========================= */
-function broadcastQueue() {
-    io.emit('queueUpdated', queue);
-    io.emit('currentlyPlaying', currentlyPlaying);
-}
-
-/* =========================
-   AUTH ROUTES
-========================= */
-app.get('/login', (req, res) => {
-    if (!SPOTIFY_CLIENT_ID || !REDIRECT_URI) {
-        return res.status(500).send('Missing Spotify config.');
-    }
-
-    const scope = [
-        'streaming',
-        'user-read-email',
-        'user-read-private',
-        'user-read-playback-state',
-        'user-modify-playback-state'
-    ].join(' ');
-
-    const authUrl = 'https://accounts.spotify.com/authorize?' + querystring.stringify({
-        client_id: SPOTIFY_CLIENT_ID,
-        response_type: 'code',
-        redirect_uri: REDIRECT_URI,
-        scope,
-        show_dialog: true
-    });
-
-    res.redirect(authUrl);
-});
-
-app.get('/callback', async (req, res) => {
-    const code = req.query.code;
-    const error = req.query.error;
-
-    if (error) {
-        console.error('Spotify callback error:', error);
-        return res.status(400).send(`Spotify login denied: ${error}`);
-    }
-
-    if (!code) {
-        return res.status(400).send('No authorization code received.');
-    }
-
-    const authHeader = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
-
-    try {
-        const tokenRes = await axios.post(
-            'https://accounts.spotify.com/api/token',
-            querystring.stringify({
-                code,
-                redirect_uri: REDIRECT_URI,
-                grant_type: 'authorization_code'
-            }),
-            {
-                headers: {
-                    Authorization: `Basic ${authHeader}`,
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                }
-            }
-        );
-
-        req.session.spotifyAccessToken = tokenRes.data.access_token;
-        req.session.spotifyRefreshToken = tokenRes.data.refresh_token;
-        req.session.spotifyAccessTokenExpiresAt = Date.now() + (tokenRes.data.expires_in * 1000);
-
-        console.log('OAuth success. Session set.');
-        return res.redirect('/?authenticated=true');
-    } catch (err) {
-        console.error('OAuth FULL ERROR:', err.response?.data || err.message);
-        return res.status(500).json({
-            message: 'Authentication failed',
-            error: err.response?.data || err.message
-        });
-    }
-});
-
-app.get('/api/auth-status', (req, res) => {
-    res.json({
-        authenticated: !!req.session.spotifyAccessToken
-    });
-});
-
-app.get('/api/token', async (req, res) => {
-    try {
-        const token = await getValidUserToken(req);
-
-        if (!token) {
-            console.log('GET TOKEN -> NO TOKEN');
-            return res.status(401).json({ error: 'Not logged in' });
-        }
-
-        console.log('GET TOKEN -> OK');
-        return res.json({ accessToken: token });
-    } catch (err) {
-        console.error('TOKEN ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to get token' });
-    }
-});
-
-/* =========================
-   DATA ROUTES
-========================= */
-app.get('/api/queue', (req, res) => {
-    res.json({ queue, currentlyPlaying });
-});
-
 app.get('/api/search', async (req, res) => {
     const query = String(req.query.q || '').trim();
-    if (!query) return res.json([]);
-
-    const normalized = query.toLowerCase();
-
-    try {
-        const spotifyResults = await spotifySearch(query);
-        if (spotifyResults?.length) {
-            return res.json(spotifyResults);
-        }
-    } catch (err) {
-        console.error('Spotify search error:', err.response?.data || err.message);
-    }
-
-    const fallback = sampleSongs.filter(song =>
-        song.title.toLowerCase().includes(normalized) ||
-        song.artist.toLowerCase().includes(normalized)
-    );
-
-    return res.json(fallback);
-});
-
-/* =========================
-   PLAY ROUTE
-========================= */
-app.post('/api/play', async (req, res) => {
-    const { trackUri, deviceId } = req.body || {};
-
-    console.log('PLAY REQUEST:', { trackUri, deviceId });
-
-    if (!trackUri) {
-        return res.status(400).json({ error: 'Track URI required.' });
-    }
-
-    if (!deviceId) {
-        return res.status(400).json({ error: 'deviceId required.' });
+    if (!query) {
+        return res.json([]);
     }
 
     try {
-        const playRes = await spotifyApiRequest(
-            req,
-            'PUT',
-            `https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(deviceId)}`,
-            {
-                uris: [trackUri]
-            }
-        );
-
-        console.log('PLAY OK:', playRes.status);
-
-        const nextItem = queue.shift();
-        if (nextItem) {
-            currentlyPlaying = {
-                title: nextItem.title,
-                artist: nextItem.artist,
-                requestedBy: nextItem.requestedBy,
-                uri: nextItem.uri || null
-            };
-        } else {
-            currentlyPlaying = {
-                title: 'Playing from Spotify',
-                artist: '',
-                requestedBy: ''
-            };
-        }
-
-        broadcastQueue();
-        return res.json({ success: true });
+        const results = await searchYoutube(query);
+        return res.json(results);
     } catch (err) {
-        console.error('PLAY ERROR:', err.response?.data || err.message);
-        return res.status(err.statusCode || 500).json({
-            error: 'Failed to start playback.',
-            details: err.response?.data || err.message
-        });
+        console.error('SEARCH ERROR:', err.message || err);
+        return res.json([]);
     }
 });
 
-/* =========================
-   OPTIONAL: DEVICES
-========================= */
-app.get('/api/devices', async (req, res) => {
-    try {
-        const r = await spotifyApiRequest(req, 'GET', 'https://api.spotify.com/v1/me/player/devices');
-        return res.json(r.data.devices || []);
-    } catch (err) {
-        console.error('DEVICES ERROR:', err.response?.data || err.message);
-        return res.status(err.statusCode || 500).json({
-            error: 'Failed to get devices.',
-            details: err.response?.data || err.message
-        });
-    }
-});
-
-/* =========================
-   REQUEST ROUTE
-========================= */
-app.post('/api/request', (req, res) => {
-    const { title, artist, requestedBy, uri } = req.body || {};
-
-    if (!title || !artist) {
-        return res.status(400).json({ error: 'Song title and artist are required.' });
-    }
-
-    const newItem = {
-        id: String(nextQueueId++),
-        title,
-        artist,
-        requestedBy: requestedBy || 'Guest',
-        uri: uri || null,
-        votes: 0,
-        voters: []
-    };
-
-    queue.push(newItem);
-    broadcastQueue();
-    return res.status(201).json(newItem);
+app.get('/api/queue', (req, res) => {
+    res.json({
+        queue,
+        currentlyPlaying: current,
+        viewers,
+        skipThreshold: currentSkipThreshold()
+    });
 });
 
 /* =========================
    SOCKET.IO
 ========================= */
 io.on('connection', socket => {
-    connectedCount += 1;
-    io.emit('viewerCount', connectedCount);
+    viewers += 1;
+    emitState();
 
     socket.emit('queueUpdated', queue);
-    socket.emit('currentlyPlaying', currentlyPlaying);
+    socket.emit('currentlyPlaying', current);
 
     socket.on('requestSong', payload => {
-        const { title, artist, requestedBy, uri } = payload || {};
-        if (!title || !artist) return;
-
-        const newItem = {
-            id: String(nextQueueId++),
-            title,
-            artist,
-            requestedBy: requestedBy || 'Guest',
-            uri: uri || null,
-            votes: 0,
-            voters: []
-        };
-
-        queue.push(newItem);
-        broadcastQueue();
+        try {
+            const added = addToQueue(payload);
+            if (!added) return;
+        } catch (err) {
+            console.error('REQUEST SONG ERROR:', err.message || err);
+        }
     });
 
     socket.on('voteSkip', songId => {
-        const item = queue.find(song => song.id === songId);
-        if (!item) return;
+        try {
+            if (!current || !queue.length) return;
 
-        if (!item.voters.includes(socket.id)) {
-            item.voters.push(socket.id);
-            item.votes = item.voters.length;
+            const first = queue[0];
+            if (!first) return;
+            if (String(first.id) !== String(songId)) return;
 
-            const skipThreshold = Math.max(1, Math.ceil(connectedCount / 2));
+            if (!first.voters.includes(socket.id)) {
+                first.voters.push(socket.id);
+                first.votes = first.voters.length;
 
-            if (item.votes >= skipThreshold) {
-                queue = queue.filter(song => song.id !== songId);
+                const threshold = currentSkipThreshold();
+                if (first.votes >= threshold) {
+                    advanceQueue();
+                    return;
+                }
+
+                emitState();
             }
+        } catch (err) {
+            console.error('VOTE SKIP ERROR:', err.message || err);
+        }
+    });
 
-            broadcastQueue();
+    socket.on('trackEnded', data => {
+        try {
+            if (!current) return;
+            if (!data || Number(data.playId) !== Number(current.playId)) return;
+            advanceQueue();
+        } catch (err) {
+            console.error('TRACK ENDED ERROR:', err.message || err);
         }
     });
 
     socket.on('disconnect', () => {
-        connectedCount = Math.max(0, connectedCount - 1);
-        io.emit('viewerCount', connectedCount);
+        viewers = Math.max(0, viewers - 1);
+
+        if (current && Array.isArray(current.voters)) {
+            const idx = current.voters.indexOf(socket.id);
+            if (idx !== -1) {
+                current.voters.splice(idx, 1);
+                current.votes = current.voters.length;
+            }
+        }
+
+        emitState();
     });
 });
 
 /* =========================
-   START SERVER
+   ERROR GUARDS
+========================= */
+process.on('uncaughtException', err => {
+    console.error('UNCAUGHT EXCEPTION:', err);
+});
+
+process.on('unhandledRejection', err => {
+    console.error('UNHANDLED REJECTION:', err);
+});
+
+/* =========================
+   START
 ========================= */
 server.listen(PORT, () => {
-    console.log(`Music request app running on http://localhost:${PORT}`);
+    console.log(`Music room running on http://localhost:${PORT}`);
 });
